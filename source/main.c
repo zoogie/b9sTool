@@ -3,9 +3,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include "payload.h"
+#include "firm_old.h"
+#include "firm_new.h"
 
-#define VERSION "2.1.0"
+#define VERSION "3.0.0"
 #define RWCHUNK	(2048*512) //2048 sectors (1 MB)
+#define RWMINI	(RWCHUNK/16) //64 KB
 
 //Function index________________________
 int main();
@@ -16,6 +21,7 @@ void xorbuff(u8 *in1, u8 *in2, u8 *out);
 void installB9S();
 u32 handleUI();
 u32 waitNandWriteDecision();
+u32 getMBremaining();
 void error(int code);
 //______________________________________
 
@@ -28,7 +34,9 @@ int menu_index=0;
 u32 sysid=0;  //NCSD magic
 u32 ninfo=0;  //nand size in sectors
 u32 sizeMB=0; //nand/firm size in MB
+u32 remainMB=0;
 u32 System=0; //will be one of the below 2 variables
+int b9s_install_count=0; //don't let user do this more than once!
 u32 N3DS=2;
 u32 O3DS=1;
 char workdir[]= "boot9strap";
@@ -40,37 +48,35 @@ u8 *nbuff; //nand
 PrintConsole topScreen;
 PrintConsole bottomScreen;
 
-const char *boot9strap="boot9strap.firm";
-const char *fnameOLD="2.54-0_11.4_OLD.firm";
-const char *fnameNEW="2.54-0_11.4_NEW.firm";
-const char *fnum="11.4.0";
-
 int main() {
-	videoSetMode(MODE_0_2D);    //first 7 lines are all dual screen printing init taken from libnds's nds-examples
-	videoSetModeSub(MODE_0_2D);
-
-	vramSetBankA(VRAM_A_MAIN_BG);
+	
+	videoSetModeSub(MODE_0_2D); //first 7 lines are all dual screen printing init taken from libnds's nds-examples
+	videoSetMode(MODE_0_2D);   
 	vramSetBankC(VRAM_C_SUB_BG);
-
-	consoleInit(&topScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, true, true);
+	vramSetBankA(VRAM_A_MAIN_BG);
 	consoleInit(&bottomScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, false, true);
-    consoleSelect(&topScreen);
-
+	consoleInit(&topScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, true, true);
+    consoleSelect(&topScreen); 
+	
+    iprintf("initializing fat...\n");
 	if (!fatInitDefault()) error(0);
 
-	workbuffer = (u8*)memalign(RWCHUNK,32);  //setup and allocate our buffers. 4 x 1MB. the dsi and 3ds can handle this given 16MB ram. should crash ds.
-	fbuff = (u8*)memalign(RWCHUNK,32);
-	nbuff = (u8*)memalign(RWCHUNK,32);
-	xbuff = (u8*)memalign(RWCHUNK,32);
-
-	mkdir(workdir, 0777);   //b9sTool folder creation
+	workbuffer = (u8*)malloc(RWCHUNK);  //setup and allocate our buffers. 
+	fbuff = (u8*)malloc(RWMINI);
+	nbuff = (u8*)malloc(RWMINI);
+	xbuff = (u8*)malloc(RWMINI);
+	
+	remainMB=getMBremaining();
+	
+	mkdir(workdir, 0777);   //boot9strap folder creation
 	chdir(workdir);
-
 	checkNCSD();     //read ncsd header for needed info
-
+	
+	//iprintf("\rwaiting...%c%c%c",firm_old[0], firm_new[0], payload[0]);
+	//while(1)swiWaitForVBlank();
 	while(handleUI());  //game loop
 
-	free(workbuffer); free(fbuff); free(nbuff); free(xbuff);
+	systemShutDown();
 	return 0;
 }
 
@@ -82,23 +88,12 @@ int checkNCSD() {
 	else if(ninfo==0x00280000){ System=N3DS;}    //new3ds
 	if(!System || sysid != 0x4453434E)error(2);  //this error triggers if NCSD magic not present or nand size unexpected value.
 
-	if(System==O3DS){  //checking for firm files, 10.4 and 11.0 - 11.2 as of this writing.
-		if(access(boot9strap,F_OK) == -1)return -1;  //these errors allowed to pass so users can still dump/restore nand.
-		if(access(fnameOLD,F_OK) == -1)return -1;
-	}
-	else if(System==N3DS){
-		if(access(boot9strap,F_OK) == -1)return -1;
-		if(access(fnameNEW,F_OK) == -1)return -1;
-	}
-	else{
-		return -1;
-	}
-
-  return 0;
+	return 0;
 }
 
 void dump3dsNand(int mode) {
 	consoleClear();
+	remainMB=getMBremaining();
 	u32 foffset;
 	if(mode){                                   //full nand dump/restore (mode=1).
 		foffset=0x0;
@@ -122,37 +117,48 @@ void dump3dsNand(int mode) {
 			strcpy(nand_type,"F0F1_NEW3DS.BIN");
 		}
 	}
-	iprintf("opening b9sTool/%s\n",nand_type);
+	
+	if(remainMB < (sizeMB + 20) ) {
+		iprintf("Error: not enough disk space!\n");
+		iprintf("You need %ldMB free\n", sizeMB + 20);  //the extra 20 MBs is a "safety buffer"
+		iprintf("You have %ldMB free\n", remainMB);
+		iprintf("You need to free up %ldMB\n", sizeMB + 20 - remainMB);
+		int wait=60; while(wait--)swiWaitForVBlank();
+		return;
+	}
+	
+	iprintf("open boot9strap/%s\n",nand_type); //open boot9strap/F0F1_OLD3DS.BIN (31 chars - ok)
 	iprintf("hold B to cancel\n");
 
 	FILE *f = fopen(nand_type, "wb");
 	if(!f)error(1);
 
 	u32 rwTotal=sizeMB*1024*1024;
-
+	iprintf("progress 0/%dMB    \r", (int)rwTotal / 0x100000);
 	for(int i=0;i<rwTotal;i+=RWCHUNK){           //read from nand, dump to sd
 		if(nand_ReadSectors(i / 0x200 + foffset, RWCHUNK / 0x200, workbuffer) == false){
 			iprintf("nand read error\noffset: %08X\naborting...", (int)i);
-			unlink(nand_type);
+			fclose(f); unlink(nand_type);
 			break;
 		}
 		if(fwrite(workbuffer, 1, RWCHUNK, f) < RWCHUNK){
 			iprintf("sdmc write error\noffset: %08X\naborting...", (int)i);
-			unlink(nand_type);
+			fclose(f); unlink(nand_type);
 			break;
 		}
-		iprintf("progress %d/%dMBs   \r",i / 0x100000 + 1, (int)rwTotal / 0x100000);
+		iprintf("progress %d/%dMB    \r",i / 0x100000 + 1, (int)rwTotal / 0x100000);
 		scanKeys();
 		int keys = keysHeld();
 		if(keys & KEY_B){
 			iprintf("\ncanceling...");
-			unlink(nand_type);
+			fclose(f); unlink(nand_type);
 			break;
 		}
 	}
 
 	fclose(f);
 	iprintf("\ndone.\r");
+	remainMB=getMBremaining(); //for the title status
 }
 
 void restore3dsNand(int mode) {
@@ -187,14 +193,14 @@ void restore3dsNand(int mode) {
 	if(waitNandWriteDecision())return;
 	consoleClear();
 
-	iprintf("opening b9sTool/%s\n",nand_type);
+	iprintf("open boot9strap/%s\n",nand_type);
 	iprintf("do NOT poweroff!!\n");
 
 	FILE *f = fopen(nand_type, "rb");
 	if(!f)error(1);
 
 	u32 rwTotal=sizeMB*1024*1024;
-
+	iprintf("progress 0/%dMB    \r", (int)rwTotal / 0x100000);
 	for(int i=0;i<rwTotal;i+=RWCHUNK){
 		if(fread(workbuffer, 1, RWCHUNK, f) < RWCHUNK){
 			rerror++;
@@ -203,7 +209,7 @@ void restore3dsNand(int mode) {
 		if(nand_WriteSectors(i / 0x200 + foffset, RWCHUNK / 0x200, workbuffer) == false){
 			werror++;
 		}
-		iprintf("progress %d/%dMBs   \r",i / 0x100000 + 1, (int)rwTotal / 0x100000);
+		iprintf("progress %d/%dMB    \r",i / 0x100000 + 1, (int)rwTotal / 0x100000);
 	}
 
 	fclose(f);
@@ -214,7 +220,7 @@ void restore3dsNand(int mode) {
 
 void xorbuff(u8 *in1, u8 *in2, u8 *out){
 
-	for(int i=0; i < RWCHUNK; i++){
+	for(int i=0; i < RWMINI; i++){
 		out[i] = in1[i] ^ in2[i];
 	}
 
@@ -222,49 +228,36 @@ void xorbuff(u8 *in1, u8 *in2, u8 *out){
 
 void installB9S() {
 	consoleClear();
-	sizeMB=4;
-
-	iprintf("%sWILL BRICK%s if a9lh is already\n", yellow, white);
-	iprintf("installed!\n\n");
-
+	iprintf("%sWILL BRICK%s if A9LH is installed!", yellow, white); 
+	iprintf("%sBACKUP%s your NAND&F0F1 first!\n", yellow, white);
+	iprintf("%sMAKE SURE%s your firmware matches\n", yellow, white);
+	iprintf("the %sBLUE%s above!\n\n", blue, white);
 	if(waitNandWriteDecision())return;
 	consoleClear();
-
-	FILE *f104;
-	FILE *fxxx;
+	if(b9s_install_count){
+		iprintf("Don't do this again!\n");
+		int wait=60; while(wait--)swiWaitForVBlank();
+		return;
+	}
 
 	if     (System==O3DS){
-		iprintf("opening %s/%s\nand          */%s\n", workdir, boot9strap,fnameOLD);
-		f104 = fopen(boot9strap,"rb");
-		fxxx = fopen(fnameOLD,"rb");
+		memcpy(fbuff, firm_old, payload_len);
 	}
 	else {
-		iprintf("opening %s/%s\nand          */%s\n", workdir, boot9strap,fnameNEW);
-		f104 = fopen(boot9strap,"rb");
-		fxxx = fopen(fnameNEW,"rb");
+		memcpy(fbuff, firm_new, payload_len);
 	}
 
-	if (!fxxx || !f104) error(3);
+	u32 foffset=0x0B130000 / 0x200; //firm0 nand offset
 
-	u32 foffset=0x0B130000/0x200; //firm0 nand offset
-	u32 rwTotal=sizeMB*1024*1024;
+	nand_ReadSectors(foffset, payload_len / 0x200, nbuff);  //get raw enc firm 11.x on nand
+	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm 11.x with plaintext firm 11.x to create xorpad buff
+	memcpy(fbuff, payload, payload_len);                    //get payload
+	xorbuff(fbuff,xbuff,nbuff);                             //xor payload and xorpad to create final encrypted image to write to nand
+	nand_WriteSectors(foffset, payload_len / 0x200, nbuff); //write it to nand
 
-	for (int i=0; i < rwTotal; i+=RWCHUNK) {
-
-		fread(fbuff, 1, RWCHUNK, fxxx);                                 //get dec firm 11.x on sd
-		nand_ReadSectors(i / 0x200 + foffset, RWCHUNK / 0x200, nbuff);  //get enc firm 11.x on nand
-		xorbuff(fbuff,nbuff,xbuff);                                     //xor the above two buffs to create xorpad buff
-		fread(fbuff, 1, RWCHUNK, f104);                                 //get dec firm 10.4 on sd
-		xorbuff(fbuff,xbuff,nbuff);                                     //xor dec sd firm 10.4 and xorpad to create final encrypted image to write to nand
-		nand_WriteSectors(i / 0x200 + foffset, RWCHUNK / 0x200, nbuff); //write to nand
-
-		iprintf("%d/%dMBs DON'T poweroff!\r", i / 0x100000 + 1, (int)rwTotal / 0x100000);
-	}
-
-	fclose(f104);
-	fclose(fxxx);
-
+	iprintf("%d KBs written to FIRM0\r", payload_len / 1024);
 	iprintf("\ndone.");
+	b9s_install_count++;
 }
 
 u32 handleUI(){
@@ -272,19 +265,23 @@ u32 handleUI(){
 	consoleClear();
 
 	const int menu_size=6;
-	const char menu[][32]={
+	const char menu[][64]={
 		{"Exit\n"},
-		{"Install boot9strap\n"},
-		{"Dump    NAND"},
-		{"Restore NAND\n"},
-		{"Dump    F0F1"},
-		{"Restore F0F1"},
+		{"Install boot9strap\n\n   \x1b[32;1m--NAND--\x1b[37;1m"},
+		
+		//--NAND--
+		{"Dump to sdmc"},
+		{"Restore from sdmc\n\n   \x1b[32;1m--F0F1--\x1b[37;1m"},
+		
+		//--F0F1--
+		{"Dump to sdmc"},
+		{"Restore from sdmc"},
 	};
 
-	iprintf("b9sTool %s\n", VERSION);
+	iprintf("b9sTool %s | %ldMB free\n", VERSION, remainMB); 
 	if    (System==O3DS)iprintf("%sOLD 3DS%s\n", yellow, white);
 	else                iprintf("%sNEW 3DS%s\n", yellow, white);
-	iprintf("%s%s%s\n\n", blue, fnum, white);
+	iprintf("%s%s%s\n\n", blue, firmwareNames, white);
 
 	for(int i=0;i<menu_size;i++){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
@@ -328,6 +325,13 @@ u32 waitNandWriteDecision(){
 	return 0;
 }
 
+u32 getMBremaining(){
+	struct statvfs stats;
+	statvfs("/", &stats);
+	u64 total_remaining = ((u64)stats.f_bsize * (u64)stats.f_bavail) / (u64)0x100000;
+	return (u32)total_remaining;
+}
+
 void error(int code){
 	switch(code){
 		case 0: iprintf("Fat could not be initialized!\n"); break;
@@ -338,6 +342,6 @@ void error(int code){
 	}
 
 	iprintf("Press home to exit\n");
-	free(workbuffer); free(fbuff); free(nbuff); free(xbuff);
+	//free(workbuffer); free(fbuff); free(nbuff); free(xbuff);
 	while(1)swiWaitForVBlank();
 }

@@ -8,6 +8,10 @@ endif
 
 include $(DEVKITARM)/ds_rules
 
+ifndef FIRM_INFO
+$(error Please set FIRM_INFO="11.4 - 11.5 only" (example) to inform b9sTool users if they are using an outdated tool)
+endif
+
 #---------------------------------------------------------------------------------
 # TARGET is the name of the output
 # BUILD is the directory where object files & intermediate files will be placed
@@ -97,7 +101,9 @@ export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 #---------------------------------------------------------------------------------
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
+	@python build_headers.py $(FIRM_INFO)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@cp b9sTool.nds boot.nds
  
 #---------------------------------------------------------------------------------
 clean:
