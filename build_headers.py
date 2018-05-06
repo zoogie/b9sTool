@@ -5,11 +5,11 @@ def generateHeader(buff, arrayName, firmwareNames):
 	if firmwareNames != "":
 		f.write('const char firmwareNames[] = '+firmwareNames+';\n')
 	f.write("const unsigned int "+arrayName+"_len = "+str(len(buff))+";\n")
-	f.write("extern const unsigned char "+arrayName+"[];\n")
+	f.write("extern unsigned char "+arrayName+"[];\n")
 	f.close()
 	
 	f=open("source/"+arrayName+".c","w")
-	f.write("const unsigned char "+arrayName+"[] = {\n")
+	f.write("unsigned char "+arrayName+"[] = {\n")
 	for i in buff:
 		f.write("0x"+binascii.hexlify(i)+",")
 	f.write("\n")
