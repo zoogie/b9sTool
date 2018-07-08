@@ -104,7 +104,7 @@ int main() {
 		iprintf("Creating BACKUP.BIN...\n");
 		res = createBackup();
 		iprintf("Create backup res: %08X\n", res);
-		if(res) error(9);
+		if(res) error(8);
 		res = verifyBackup();
 		iprintf("Verify backup res: %08X\n", res);
 	}
@@ -197,6 +197,8 @@ u32 handleUI(){
 	for(int i=0;i<menu_size;i++){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
 	}
+	
+	iprintf("\nWARNING: Don't lose your\nsdmc:/boot9strap/BACKUP.BIN !!");
 
 	swiWaitForVBlank();
 	scanKeys();
