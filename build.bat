@@ -1,3 +1,4 @@
-make FIRM_INFO="BETA: 11.4 - 11.7 ONLY"
+make clean FIRM_INFO="BETA: firm 11.8 ONLY"
+make FIRM_INFO="BETA: firm 11.8 ONLY"
 cp boot.nds h:/
 pause
