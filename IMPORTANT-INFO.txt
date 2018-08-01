@@ -29,7 +29,7 @@ If you're sure this is a false positive: rename boot9strap/key.bin (this is your
 Then rerun b9sTool and the error should be skipped and you get to the menu.
 
 B. The first time you run b9sTool, you get BACKUP.BIN verify errors of some sort.
-- Make sure BACKUP.BIN is in the boot9strap folder. Don't move it around. Moving it will not cause the file to regenerate.
+- Make sure BACKUP.BIN is in the boot9strap folder. Don't move it around or rename it. Moving/renaming it will not cause the file to regenerate. Just don't ever touch it.
 - Rename boot9strap/key.bin to danger_reset_backup (no file extension)
 Then rerun b9sTool and hopefully the menu shows up.
 
