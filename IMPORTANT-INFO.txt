@@ -34,7 +34,7 @@ B. The first time you run b9sTool, you get BACKUP.BIN verify errors of some sort
 Then rerun b9sTool and hopefully the menu shows up.
 
 C. You select "Install boot9strap", reset the system, hold select, but the system just boots up normal.
-- Boot b9sTool and make sure the FIRM STATUS says "STOCK"
+- Boot b9sTool and make sure the FIRM STATUS says "STOCK". If it says FIRM STATUS: B9S, then select "Restore stock firmware".
 Then rename boot9strap/key.bin to danger_reset_backup (no file extension)
 Run b9sTool again, choose "Install boot9strap" and hopefully select will yield luma3ds config on next reboot.
 - If the above fails and you have an old 3ds/2ds (i.e. NOT New 3ds/2ds), you may try to fix your firms with the 3ds's built-in recovery mode.
