@@ -8,7 +8,7 @@
 #include "firm_old.h"
 #include "firm_new.h"
 
-#define VERSION "4.0.1"
+#define VERSION "4.0.2"
 #define RWCHUNK	(3072*512) //3072 sectors (1.5 MB)
 #define RWMINI	(128*512) //64 KB
 
@@ -33,7 +33,7 @@ int file2buf(char *path, u8 *buf, u32 limit);
 int createBackup();
 int verifyBackup();
 int checkA9LH();
-int verifyUnlockKey(char *path);
+int verifyUnlockKey(char *path, bool delete);
 void error(int code);
 //______________________________________
 
@@ -42,6 +42,7 @@ const char *yellow="\x1b[33;1m";
 const char *blue="\x1b[34;1m";
 const char *dblue="\x1b[34;0m";
 const char *white="\x1b[37;1m";
+const char *red="\x1b[31;1m";
 
 int menu_index=0;
 u32 MB=0x100000;
@@ -155,6 +156,7 @@ void installB9S(u32 firmtype) {
 		nand_ReadSectors(foffset, MB/0x200, workbuffer);
 		swiSHA1Calc(hash,  workbuffer, MB);
 		res = memcmp(hash, header_offset+0x20, 20);
+		if(res) iprintf("%sNAND WRITE FAIL !!!!!!!!!!!!!!\n",red);
 		iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
 		iprintf("%d KBs written to FIRM0\r", (int)(MB/1024));
 	}
@@ -163,8 +165,10 @@ void installB9S(u32 firmtype) {
 		nand_ReadSectors(foffset, payload_len/0x200, workbuffer+MB);
 		swiSHA1Calc(hash,  workbuffer+MB, payload_len);
 		res = memcmp(hash, header_offset+0x40, 20);
+		if(res) iprintf("%sNAND WRITE FAIL !!!!!!!!!!!!!!\n",red);
 		iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
 		iprintf("%d KBs written to FIRM0\r", payload_len / 1024);
+		unlink("/luma/config.bin");
 	}
 
 	iprintf("\nDone!\n");
@@ -198,7 +202,7 @@ u32 handleUI(){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
 	}
 	
-	iprintf("\nWARNING: Don't lose your\nsdmc:/boot9strap/BACKUP.BIN !!");
+	iprintf("\nWARNING: DONT delete/move/renamesdmc:/boot9strap/BACKUP.BIN !!");
 
 	swiWaitForVBlank();
 	scanKeys();
@@ -368,7 +372,7 @@ int verifyBackup(){
 		return 1;
 	}
 	else{
-		res = verifyUnlockKey("danger_reset_backup");
+		res = verifyUnlockKey("danger_reset_backup", true);
 		if(!res){
 			printf("Reset file found, recreating\nBACKUP.BIN...\n");
 			return 1;
@@ -410,7 +414,7 @@ int checkA9LH(){
 	int res=0;
 	iprintf("Checking for A9LH...\n");
 	
-	res = verifyUnlockKey("danger_skip_a9lh");  //override check if file found
+	res = verifyUnlockKey("danger_skip_a9lh", false);  //override check if file found
 	if(!res){
 		iprintf("A9LH file found, overriding\nA9LH check. This is *very*\ndangerous!!\n");
 		return 1;
@@ -426,7 +430,7 @@ int checkA9LH(){
 	return 0;
 }
 
-int verifyUnlockKey(char *path){
+int verifyUnlockKey(char *path, bool delete){
 	FILE *f=fopen(path,"rb");
 	if(!f){
 		//iprintf("Unlock file read error\n");
@@ -437,7 +441,7 @@ int verifyUnlockKey(char *path){
 	nand_ReadSectors(0, 1, workbuffer+0x200);
 	
 	if(memcmp(workbuffer, workbuffer+0x200, 0x200)) return 1;
-	unlink(path);
+	if(delete==true) unlink(path);
 	
 	return 0;
 }

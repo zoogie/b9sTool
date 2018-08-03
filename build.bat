@@ -1,4 +1,4 @@
-make clean FIRM_INFO="BETA: firm 11.8 ONLY"
-make FIRM_INFO="BETA: firm 11.8 ONLY"
+make clean FIRM_INFO="For firmware 11.8.0-X ONLY"
+make FIRM_INFO="For firmware 11.8.0-X ONLY"
 cp boot.nds h:/
 pause
