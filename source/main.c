@@ -8,7 +8,7 @@
 #include "firm_old.h"
 #include "firm_new.h"
 
-#define VERSION "4.0.2"
+#define VERSION "4.1.2"
 #define RWCHUNK	(3072*512) //3072 sectors (1.5 MB)
 #define RWMINI	(128*512) //64 KB
 
@@ -17,6 +17,7 @@ const u8 SHA1NEW[20]={0x2D,0xCA,0xB6,0x41,0xA7,0xDC,0xA7,0x8F,0x84,0xC2,0x72,0x1
 const u8 SHA1B9S[20]={0xBF,0x91,0x19,0x46,0xB2,0x42,0x63,0x7C,0x11,0x05,0xCC,0x6B,0xD3,0xF2,0x81,0x58,0xBC,0xC6,0xE2,0xD1}; //boot9strap 1.3
 u32 foffset=0x0B130000 / 0x200;
 u32 hoffset=(0x0B130000 / 0x200) + (0x800000/0x200) - 1;
+int menu_size=2;
 
 //Function index________________________
 int main();
@@ -55,10 +56,13 @@ u32 System=0; //will be one of the below 2 variables
 int b9s_install_count=0; //don't let user do this more than once!
 u32 N3DS=2;
 u32 O3DS=1;
+u32 UNKNOWN=3; //if this firm status occurs, a sys update likely occured. so installing b9s would probably be the safe route rather than downgrading firm. corruption (or user firm modification) could also be the reason,
+               //in which case either option would be ok. there are key.bin overrides for these scenarios.
 u32 B9S=2;
 u32 STOCK=1;
 u32 firmStatus=0;
 u64 frame=0;
+
 char workdir[]= "boot9strap";
 char nand_type[80]={0};   //sd filename buffer for nand/firm dump/restore.
 u8 *workbuffer; //raw dump and restore in first two options
@@ -111,9 +115,9 @@ int main() {
 	}
 	
 	if(res) error(7);
-	if(firmStatus != B9S && firmStatus != STOCK) error(6);
+	if(firmStatus == 0) error(6);
 	
-	int wait=60;
+	int wait=120;
 	while(wait--)swiWaitForVBlank();
 	while(handleUI());  //game loop
 
@@ -160,7 +164,7 @@ void installB9S(u32 firmtype) {
 		iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
 		iprintf("%d KBs written to FIRM0\r", (int)(MB/1024));
 	}
-	else if(firmtype==STOCK){
+	else if(firmtype==STOCK || firmtype==UNKNOWN){
 		nand_WriteSectors(foffset, payload_len/0x200, workbuffer+MB);
 		nand_ReadSectors(foffset, payload_len/0x200, workbuffer+MB);
 		swiSHA1Calc(hash,  workbuffer+MB, payload_len);
@@ -176,21 +180,24 @@ void installB9S(u32 firmtype) {
 }
 
 u32 handleUI(){
+	int res;
 	consoleSelect(&topScreen);
 	consoleClear();
-	const char status[3][64]={
+	const char status[4][64]={
 		{"never see me I hope"},
 		{"STOCK"}, //aka clean firm
 		{"B9S"},
+		{"UNKNOWN"}
 	};
 	
 	char action[64];
 	sprintf(action,"%s\n",(firmStatus==B9S) ? "Restore stock firmware":"Install boot9strap");
 
-	const int menu_size=2;
-	char menu[2][64];
+	char menu[3][64];
+	int keytimer=300;
 	strcpy(menu[0],"Exit\n");
 	strcpy(menu[1],action);
+	sprintf(menu[2],"%sReset BACKUP.BIN (danger!)%s", red, white);
 
 	iprintf("b9sTool %s | %ldMB free\n", VERSION, remainMB); 
 	if    (System==O3DS)iprintf("%sOLD 3DS%s\n", yellow, white);
@@ -207,6 +214,7 @@ u32 handleUI(){
 	swiWaitForVBlank();
 	scanKeys();
 	int keypressed=keysDown();
+	int kheld;
 
 	if     (keypressed & KEY_DOWN)menu_index++;
 	else if(keypressed & KEY_UP)  menu_index--;
@@ -214,6 +222,14 @@ u32 handleUI(){
 		consoleSelect(&bottomScreen);
 		if     (menu_index==0)return 0;          //break game loop and exit app
 		else if(menu_index==1)installB9S(firmStatus);
+		else if(menu_index==2){
+			iprintf("Creating BACKUP.BIN...\n");
+			res = createBackup();
+			iprintf("Create backup res: %08X\n", res);
+			if(res) error(8);
+			res = verifyBackup();
+			iprintf("Verify backup res: %08X\n", res);
+		}
 		//else if(menu_index==2)installB9S(STOCK);
 		//else if(menu_index==6)dump3dsNand(1);    // dump/restore full nand
 		//else if(menu_index==3)restore3dsNand(1);
@@ -222,6 +238,20 @@ u32 handleUI(){
 	}
 	if(menu_index >= menu_size)menu_index=0;     //menu index wrap around check
 	else if(menu_index < 0)    menu_index=menu_size-1;
+	
+	if(keypressed & KEY_LEFT || keypressed & KEY_X){
+		do {
+			if(menu_size==3 || firmStatus==B9S || firmStatus==UNKNOWN) break;
+			keytimer--;
+			if(keytimer < 0){
+				menu_size=3;
+			}
+			swiWaitForVBlank();
+			scanKeys();
+			kheld=keysHeld();
+		} while(kheld & KEY_LEFT && kheld & KEY_X);
+		keytimer=300;
+	}
 
 	frame++;
 	return 1;  //continue game loop
@@ -362,7 +392,12 @@ int createBackup(){
 }
 
 int verifyBackup(){
-	u8 hash[20];
+	u8 hash_stock_firm[20];
+	u8 hash_stock_sd[20];
+	
+	u8 hash_b9s_firm[20];
+	u8 hash_b9s_sd[20];
+	
 	u8 *header=(u8*)malloc(0x200);
 	int res=0;
 	
@@ -372,7 +407,7 @@ int verifyBackup(){
 		return 1;
 	}
 	else{
-		res = verifyUnlockKey("danger_reset_backup", true);
+		res = verifyUnlockKey("danger_reset_backup.bin", true);
 		if(!res){
 			printf("Reset file found, recreating\nBACKUP.BIN...\n");
 			return 1;
@@ -381,30 +416,47 @@ int verifyBackup(){
 	
 	nand_ReadSectors(foffset, MB/0x200, workbuffer);
 	
-	swiSHA1Calc(hash, workbuffer, *(u32*)(header+8));
-	if(!memcmp(hash, header+0x40, 20)){
-		firmStatus=B9S;
-	}
-	else{
-		//swiSHA1Calc(hash, workbuffer, *(u32*)(header+4));
-		//if(!memcmp(hash, header+0x20, 20))
-		firmStatus=STOCK;
-	}
+	swiSHA1Calc(hash_stock_firm, workbuffer, *(u32*)(header+4));
+	swiSHA1Calc(hash_b9s_firm, workbuffer, *(u32*)(header+8));
 	
 	if(file2buf("BACKUP.BIN", workbuffer, 0x110000))return 2;
 	if(memcmp(header, workbuffer + 0x110000-0x200, 0x200)) return 3;
 	
-	swiSHA1Calc(hash, workbuffer, *(u32*)(header+4));
-	if(memcmp(hash, header+0x20, 20)) {
+	swiSHA1Calc(hash_stock_sd, workbuffer, *(u32*)(header+4));
+	swiSHA1Calc(hash_b9s_sd, workbuffer + MB, *(u32*)(header+8));
+	
+	if(!memcmp(hash_stock_firm, header+0x20, 20)){
+		firmStatus=STOCK;
+	}
+	else if (!memcmp(hash_b9s_firm, header+0x40, 20)){
+		firmStatus=B9S;
+	}
+	else{
+		firmStatus=UNKNOWN;
+	}
+	
+	if(memcmp(hash_stock_sd, header+0x20, 20)) {
 		//firmStatus=STOCK;
 		printf("Stock firm hash bad\n");
 		return 4;
 	}
-	swiSHA1Calc(hash, workbuffer+MB, *(u32*)(header+8));
-	if(memcmp(hash, header+0x40, 20)) {
+
+	if(memcmp(hash_b9s_sd, header+0x40, 20)) {
 		//firmStatus=B9S;
 		printf("B9S firm hash bad\n");
 		return 5;
+	}
+	
+	res = verifyUnlockKey("danger_force_stock.bin", true);  //forces app to assume stock firm status. will offer the "install boot9strap" option.
+	if(!res){
+		firmStatus=STOCK;
+		printf("FIRM STATUS override: STOCK\n");
+	}
+	
+	res = verifyUnlockKey("danger_force_b9s.bin", true);    //forces app to assume b9s firm status. will offer the "restore stock firmware" option.
+	if(!res){                                               //i don't expect users to ever need these overrides.
+		firmStatus=B9S;							
+		printf("FIRM STATUS override: B9S\n");
 	}
 
 	return 0;
@@ -414,7 +466,7 @@ int checkA9LH(){
 	int res=0;
 	iprintf("Checking for A9LH...\n");
 	
-	res = verifyUnlockKey("danger_skip_a9lh", false);  //override check if file found
+	res = verifyUnlockKey("danger_skip_a9lh.bin", false);  //override check if file found
 	if(!res){
 		iprintf("A9LH file found, overriding\nA9LH check. This is *very*\ndangerous!!\n");
 		return 1;
@@ -422,7 +474,7 @@ int checkA9LH(){
 	
 	nand_ReadSectors(0x5C000, 80*KB/0x200, workbuffer); 
 	if(memmem(workbuffer, 80*KB, "arm9loaderhax.bin", 17) != 0) error(9); //standard a9lh and 3dsafe
-	if(memmem(workbuffer, 80*KB, "boot.bin", 8) != 0) error(9);           //shadowNAND
+	if(memmem(workbuffer, 80*KB, "boot.bin", 8) != 0) error(12);          //shadowNAND
 	//nand offset 0xB800000 or FIRM1+0x2D0000
     //this is where plaintext stage2 a9lh payload is written
     //and the string "arm9loaderhax.bin" or "boot.bin" should be within 80KB of that offset
@@ -468,9 +520,10 @@ void error(int code){
 		case 6:  iprintf("Failed to load valid Firm from\nBACKUP.BIN\n"); break;
 		case 7:  iprintf("Problem verifying BACKUP.BIN\n"); break;
 		case 8:  iprintf("Create BACKUP.BIN failed!\n"); break;
-		case 9:  iprintf("A9LH dectected! Brick avoided!!\nPlease install B9S with\nSafeB9SInstaller!\n"); break;
+		case 9:  iprintf("A9LH dectected! Brick avoided!!\nhttps://3ds.hacks.guide/a9lh-to-b9s.html\n"); break;
 		case 10: iprintf("Unlock file read error\n"); break;
 		case 11: iprintf("Unlock file verify error\n"); break;
+		case 12: iprintf("shadowNAND! Brick avoided!!\nhttps://3ds.hacks.guide/a9lh-to-b9s.html\n"); break;
 		case 99:;
 		default: break;
 	}

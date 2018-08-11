@@ -1,4 +1,4 @@
-This software, b9sTool 4.0.1 (b9sTool.nds, boot.nds), is distributed under the
+This software, b9sTool 4.1.2 (b9sTool.nds, boot.nds), is distributed under the
 The MIT License (MIT)
 
 Copyright (c) 2018, plailect, zoogie
