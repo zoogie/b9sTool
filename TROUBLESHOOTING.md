@@ -14,7 +14,7 @@ It should say "your system is up to date". Press ok and let the system fully reb
 Boot b9sTool again and hold X + LeftDpad for 5 seconds. A red 3rd menu option should appear for you to reset the backup. Select it. This will only work if FIRM STATUS is STOCK.
 After the backup.bin resets, choose "Install boot9strap", and hopefully you will see luma3ds config on next reboot.
 
-D. After installing boot9strap, you get FIRM STATUS: UNKNOWN
+D. After installing boot9strap, you get FIRM STATUS: UNKNOWN<br>
 Go to System Settings > Other Settings > Page 4 > System Update. Make sure to actually attempt to update with wifi on. It should say "your system is up to date".<br>
 Press ok and let the system fully reboot to home menu on its own. Then turn it off.<br>
 Go and delete sdmc:/boot9strap/BACKUP.BIN manually from the sd card<br>
