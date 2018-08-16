@@ -8,31 +8,27 @@
 #include "firm_old.h"
 #include "firm_new.h"
 
-#define VERSION "4.1.2"
-#define RWCHUNK	(3072*512) //3072 sectors (1.5 MB)
+#define VERSION "5.0.0"
 #define RWMINI	(128*512) //64 KB
 
 const u8 SHA1OLD[20]={0x6C,0xC0,0xEA,0xE5,0xDE,0x7C,0x09,0x67,0xD2,0x48,0xBE,0x52,0xAE,0x84,0x9B,0x05,0x70,0x08,0xF6,0x0C}; //native firm 2.55-0 old3ds
 const u8 SHA1NEW[20]={0x2D,0xCA,0xB6,0x41,0xA7,0xDC,0xA7,0x8F,0x84,0xC2,0x72,0x1E,0xC4,0xA4,0x6F,0xCB,0x06,0xD0,0xBD,0x4C}; //native firm 2.55-0 new3ds
 const u8 SHA1B9S[20]={0xBF,0x91,0x19,0x46,0xB2,0x42,0x63,0x7C,0x11,0x05,0xCC,0x6B,0xD3,0xF2,0x81,0x58,0xBC,0xC6,0xE2,0xD1}; //boot9strap 1.3
-u32 foffset=0x0B130000 / 0x200;
-u32 hoffset=(0x0B130000 / 0x200) + (0x800000/0x200) - 1;
+u32 foffset=0x0B130000 / 0x200; //FIRM0
+//  foffset=0x0B530000 / 0x200;   FIRM1 (for experts or yolo'ers only!)
 int menu_size=2;
 
 //Function index________________________
 int main();
 int checkNCSD();
-//void dump3dsNand(int mode);
-//void restore3dsNand(int mode);
 void xorbuff(u8 *in1, u8 *in2, u8 *out);
-void installB9S(u32 firmtype);
+void installB9S();
 u32 handleUI();
 u32 waitNandWriteDecision();
 u32 getMBremaining();
 int getFirmBuf(u32 len);
 int file2buf(char *path, u8 *buf, u32 limit);
-int createBackup();
-int verifyBackup();
+int buf2file(char *path, u8 *buf, u32 size);
 int checkA9LH();
 int verifyUnlockKey(char *path, bool delete);
 void error(int code);
@@ -53,18 +49,12 @@ u32 ninfo=0;  //nand size in sectors
 u32 sizeMB=0; //nand/firm size in MB
 u32 remainMB=0;
 u32 System=0; //will be one of the below 2 variables
-int b9s_install_count=0; //don't let user do this more than once!
 u32 N3DS=2;
 u32 O3DS=1;
-u32 UNKNOWN=3; //if this firm status occurs, a sys update likely occured. so installing b9s would probably be the safe route rather than downgrading firm. corruption (or user firm modification) could also be the reason,
-               //in which case either option would be ok. there are key.bin overrides for these scenarios.
-u32 B9S=2;
-u32 STOCK=1;
 u32 firmStatus=0;
 u64 frame=0;
 
 char workdir[]= "boot9strap";
-char nand_type[80]={0};   //sd filename buffer for nand/firm dump/restore.
 u8 *workbuffer; //raw dump and restore in first two options
 u8 *fbuff; //sd firm files
 u8 *xbuff; //xorpad
@@ -81,7 +71,6 @@ int main() {
 	consoleInit(&bottomScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, false, true);
 	consoleInit(&topScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, true, true);
     consoleSelect(&topScreen); 
-	int res=0;
 	
     iprintf("Initializing FAT... ");
 	if (!fatInitDefault()) error(0);
@@ -89,33 +78,19 @@ int main() {
 	iprintf("Initializing NAND... ");
 	if(!nand_Startup()) error(5);
 	printf("good\n");
-	workbuffer = (u8*)malloc(RWCHUNK);  //setup and allocate our buffers. 
-	if(!workbuffer) error(4);
+	
+	workbuffer = (u8*)malloc(RWMINI);  //setup and allocate our buffers. 
 	fbuff = (u8*)malloc(RWMINI);
 	nbuff = (u8*)malloc(RWMINI);
 	xbuff = (u8*)malloc(RWMINI);
+	if(!workbuffer || !fbuff || !nbuff || !xbuff) error(4);
 	
 	remainMB=getMBremaining();
-	
 	mkdir(workdir, 0777);   //boot9strap folder creation
 	chdir(workdir);
-	checkNCSD();     //read ncsd header for needed info
-	
+	checkNCSD();            //read ncsd header for needed info
 	dumpUnlockKey();
 	checkA9LH();
-	res = verifyBackup();
-	iprintf("Verify backup res: %08X\n", res);
-	if(res==1){
-		iprintf("Creating BACKUP.BIN...\n");
-		res = createBackup();
-		iprintf("Create backup res: %08X\n", res);
-		if(res) error(8);
-		res = verifyBackup();
-		iprintf("Verify backup res: %08X\n", res);
-	}
-	
-	if(res) error(7);
-	if(firmStatus == 0) error(6);
 	
 	int wait=120;
 	while(wait--)swiWaitForVBlank();
@@ -144,114 +119,108 @@ void xorbuff(u8 *in1, u8 *in2, u8 *out){
 
 }
 
-void installB9S(u32 firmtype) {
-	u8 hash[20];
-	u8 *header_offset = workbuffer + MB + 0x10000 - 0x200;
+void installB9S() {
 	int res;
+	u8 hash[20];
+	u8 hash1[20];
+	u8 hash2[20];
+	char xorname[64]={0};
 	consoleClear();
 	iprintf("%sWILL BRICK%s if A9LH is installed!", yellow, white); 
-	iprintf("%sMAKE SURE%s your firmware matches\n", yellow, white);
-	iprintf("the %sBLUE%s above!\n\n", blue, white);
+	iprintf("%sMAKE SURE%s your 3DS firmware is\n", yellow, white);
+	iprintf("%s11.8.0-X%s! Or %sFAIL%s!\n\n", blue, white, red, white);
 	if(waitNandWriteDecision())return;
 	consoleClear();
 	
-	if(firmtype==B9S){  //do opposite of firmware status
-		nand_WriteSectors(foffset, MB/0x200, workbuffer);
-		nand_ReadSectors(foffset, MB/0x200, workbuffer);
-		swiSHA1Calc(hash,  workbuffer, MB);
-		res = memcmp(hash, header_offset+0x20, 20);
-		if(res) iprintf("%sNAND WRITE FAIL !!!!!!!!!!!!!!\n",red);
-		iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
-		iprintf("%d KBs written to FIRM0\r", (int)(MB/1024));
-	}
-	else if(firmtype==STOCK || firmtype==UNKNOWN){
-		nand_WriteSectors(foffset, payload_len/0x200, workbuffer+MB);
-		nand_ReadSectors(foffset, payload_len/0x200, workbuffer+MB);
-		swiSHA1Calc(hash,  workbuffer+MB, payload_len);
-		res = memcmp(hash, header_offset+0x40, 20);
-		if(res) iprintf("%sNAND WRITE FAIL !!!!!!!!!!!!!!\n",red);
-		iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
-		iprintf("%d KBs written to FIRM0\r", payload_len / 1024);
-		unlink("/luma/config.bin");
-	}
+	memset(workbuffer, 0, RWMINI);
+	iprintf("Loading clean firm ...\n");
+	nand_ReadSectors(foffset, payload_len / 0x200, workbuffer);
+	swiSHA1Calc(hash1, workbuffer, payload_len);
+	nand_ReadSectors(foffset, payload_len / 0x200, workbuffer);
+	swiSHA1Calc(hash2, workbuffer, payload_len);
+	
+	if(memcmp(hash1, hash2, 20)) error(7);
+	memcpy(nbuff, workbuffer, payload_len);
+	
+	res = getFirmBuf(payload_len);  
+	if(!res) error(6);
 
+	if(res==O3DS){
+		memcpy(fbuff, firm_old, payload_len);
+	}
+	else if(res==N3DS){
+		memcpy(fbuff, firm_new, payload_len);
+	}
+	
+	iprintf("Preparing crypted b9s firm...\n");
+	
+	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm 11.8 with plaintext firm 11.8 to create xorpad buff
+	memcpy(fbuff, payload, payload_len);                    //get payload
+	xorbuff(fbuff,xbuff,nbuff);                             //xor payload and xorpad to create final encrypted image to write to destination
+	memcpy(workbuffer, nbuff, payload_len);	                //write it to destination
+	
+	swiSHA1Calc(hash2, workbuffer, payload_len);
+
+	nand_WriteSectors(foffset, payload_len/0x200, workbuffer);
+	nand_ReadSectors(foffset, payload_len/0x200, workbuffer);
+	swiSHA1Calc(hash,  workbuffer, payload_len);
+	res = memcmp(hash, hash2, 20);
+	if(res) iprintf("%sNAND WRITE FAIL !!!!!!!!!!!!!!\n",red);
+	iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
+	iprintf("%d KBs written to FIRM\n", payload_len / 1024);
+	unlink("/luma/config.bin");
+	
+	swiSHA1Calc(hash, xbuff, payload_len);
+	sprintf(xorname, "xorpad_%02X%02X%02X%02X.bin", hash[0],hash[1],hash[2],hash[3]);
+	buf2file(xorname, xbuff, payload_len); 					//might be useful someday, but for now, we'll just put it here for safekeeping.
+	iprintf("%s created\n", xorname);
+	
 	iprintf("\nDone!\n");
 	error(99); //not really an error, we just don't want multiple nand writes in one session.
 }
 
 u32 handleUI(){
-	int res;
 	consoleSelect(&topScreen);
 	consoleClear();
-	const char status[4][64]={
-		{"never see me I hope"},
-		{"STOCK"}, //aka clean firm
-		{"B9S"},
-		{"UNKNOWN"}
-	};
 	
 	char action[64];
-	sprintf(action,"%s\n",(firmStatus==B9S) ? "Restore stock firmware":"Install boot9strap");
+	sprintf(action,"Install boot9strap\n");
 
-	char menu[3][64];
-	int keytimer=300;
+	char menu[2][64];
 	strcpy(menu[0],"Exit\n");
 	strcpy(menu[1],action);
-	sprintf(menu[2],"%sReset BACKUP.BIN (danger!)%s", red, white);
 
 	iprintf("b9sTool %s | %ldMB free\n", VERSION, remainMB); 
-	if    (System==O3DS)iprintf("%sOLD 3DS%s\n", yellow, white);
-	else                iprintf("%sNEW 3DS%s\n", yellow, white);
-	iprintf("%s%s%s\n", frame%60<15 ? dblue:blue, firmwareNames, white);
-	iprintf("%s\nFIRM STATUS: %s%s\n\n", green, white, status[firmStatus]);
+	if    (System==O3DS)iprintf("%sOLD 3DS%s\n\n", blue, white);
+	else                iprintf("%sNEW 3DS%s\n\n", blue, white);
 
 	for(int i=0;i<menu_size;i++){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
 	}
 	
-	iprintf("\nWARNING: DONT delete/move/renamesdmc:/boot9strap/BACKUP.BIN !!");
+	iprintf("\n%sWARNING:%s DONT install boot9strap",yellow,white);
+	iprintf("multiple times!!\n");
+	iprintf("%sWARNING:%s Only use b9sTool with\n",yellow,white);
+	iprintf("https://3ds.hacks.guide\n");
+	iprintf("%sWARNING:%s\n",yellow,white);
+	
+	for(int i=0; i<(frame/30)%6 ;i++){
+		iprintf("%s%s%s\n", blue, firmwareNames, white); //even with explosions and strobing lights I don't think noobs will read this
+	}
 
 	swiWaitForVBlank();
 	scanKeys();
 	int keypressed=keysDown();
-	int kheld;
 
 	if     (keypressed & KEY_DOWN)menu_index++;
 	else if(keypressed & KEY_UP)  menu_index--;
 	else if(keypressed & KEY_A){
 		consoleSelect(&bottomScreen);
 		if     (menu_index==0)return 0;          //break game loop and exit app
-		else if(menu_index==1)installB9S(firmStatus);
-		else if(menu_index==2){
-			iprintf("Creating BACKUP.BIN...\n");
-			res = createBackup();
-			iprintf("Create backup res: %08X\n", res);
-			if(res) error(8);
-			res = verifyBackup();
-			iprintf("Verify backup res: %08X\n", res);
-		}
-		//else if(menu_index==2)installB9S(STOCK);
-		//else if(menu_index==6)dump3dsNand(1);    // dump/restore full nand
-		//else if(menu_index==3)restore3dsNand(1);
-		//else if(menu_index==4)dump3dsNand(0);    // dump/restore firm0 and firm1
-		//else if(menu_index==5)restore3dsNand(0);
+		else if(menu_index==1)installB9S();
 	}
 	if(menu_index >= menu_size)menu_index=0;     //menu index wrap around check
 	else if(menu_index < 0)    menu_index=menu_size-1;
-	
-	if(keypressed & KEY_LEFT || keypressed & KEY_X){
-		do {
-			if(menu_size==3 || firmStatus==B9S || firmStatus==UNKNOWN) break;
-			keytimer--;
-			if(keytimer < 0){
-				menu_size=3;
-			}
-			swiWaitForVBlank();
-			scanKeys();
-			kheld=keysHeld();
-		} while(kheld & KEY_LEFT && kheld & KEY_X);
-		keytimer=300;
-	}
 
 	frame++;
 	return 1;  //continue game loop
@@ -333,132 +302,16 @@ int file2buf(char *path, u8 *buf, u32 limit){
 	return 0;
 }
 
-int createBackup(){
-	memset(workbuffer, 0, 0x110000);
-	u8 hash1[20];
-	u8 hash2[20];
-	u8 *header_offset = workbuffer + MB + 0x10000 - 0x200;
-	int res;
-	//int count=0;
-	iprintf("Loading clean firm ...\n");
-	nand_ReadSectors(foffset, MB / 0x200, workbuffer);
-	swiSHA1Calc(hash1, workbuffer, MB);
-	nand_ReadSectors(foffset, MB / 0x200, workbuffer);
-	swiSHA1Calc(hash2, workbuffer, MB);
+int buf2file(char *path, u8 *buf, u32 size){
+	u32 bytes_written=0;
+	FILE *f=fopen(path, "wb");
+	if(!f) return 1;
 	
-	if(memcmp(hash1, hash2, 20)) return 1;
-	memcpy(nbuff, workbuffer, payload_len);
-	
-	res = getFirmBuf(payload_len);  
-	if(!res) return 2;
-
-	if(res==O3DS){
-		memcpy(fbuff, firm_old, payload_len);
-	}
-	else if(res==N3DS){
-		memcpy(fbuff, firm_new, payload_len);
-	}
-	
-	iprintf("Preparing crypted b9s firm...\n");
-	
-	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm 11.8 with plaintext firm 11.8 to create xorpad buff
-	memcpy(fbuff, payload, payload_len);                    //get payload
-	xorbuff(fbuff,xbuff,nbuff);                             //xor payload and xorpad to create final encrypted image to write to destination
-	memcpy(workbuffer + MB, nbuff, payload_len);	        //write it to destination
-	
-	swiSHA1Calc(hash2, workbuffer + MB, payload_len);
-	
-	iprintf("Creating header...\n");
-	
-	memcpy(header_offset, "B9ST", 4);                       //backup header - magic
-	memcpy(header_offset + 4, &MB, 4);                      //firm len. this is always 1MB which should be plenty. hashing past len won't hurt.
-	memcpy(header_offset + 8, &payload_len, 4);             //b9s payload len
-	memcpy(header_offset + 0x20, hash1, 20);                //1MB clean firm hash
-	memcpy(header_offset + 0x40, hash2, 20);                //b9s payload hash
-	
-	nand_WriteSectors(hoffset, 1, header_offset);           //store backup.bin header to nand, locking it to the system it was created on.
-	
-	iprintf("Dumping BACKUP.BIN to file...\n");
-	
-	FILE *f=fopen("BACKUP.BIN","wb");
-	if(!f) return 3;
-	fwrite(workbuffer, 1, MB + 0x10000, f);
+	bytes_written = fwrite(buf, 1, size, f);
 	fclose(f);
 	
-	iprintf("Done!\n");
+	if(bytes_written < size) return 2;
 	
-	return 0;
-	
-}
-
-int verifyBackup(){
-	u8 hash_stock_firm[20];
-	u8 hash_stock_sd[20];
-	
-	u8 hash_b9s_firm[20];
-	u8 hash_b9s_sd[20];
-	
-	u8 *header=(u8*)malloc(0x200);
-	int res=0;
-	
-	nand_ReadSectors(hoffset, 1, header);
-	//iprintf("check %s\n", header);
-	if(memcmp("B9ST", header, 4)){
-		return 1;
-	}
-	else{
-		res = verifyUnlockKey("danger_reset_backup.bin", true);
-		if(!res){
-			printf("Reset file found, recreating\nBACKUP.BIN...\n");
-			return 1;
-		}
-	}
-	
-	nand_ReadSectors(foffset, MB/0x200, workbuffer);
-	
-	swiSHA1Calc(hash_stock_firm, workbuffer, *(u32*)(header+4));
-	swiSHA1Calc(hash_b9s_firm, workbuffer, *(u32*)(header+8));
-	
-	if(file2buf("BACKUP.BIN", workbuffer, 0x110000))return 2;
-	if(memcmp(header, workbuffer + 0x110000-0x200, 0x200)) return 3;
-	
-	swiSHA1Calc(hash_stock_sd, workbuffer, *(u32*)(header+4));
-	swiSHA1Calc(hash_b9s_sd, workbuffer + MB, *(u32*)(header+8));
-	
-	if(!memcmp(hash_stock_firm, header+0x20, 20)){
-		firmStatus=STOCK;
-	}
-	else if (!memcmp(hash_b9s_firm, header+0x40, 20)){
-		firmStatus=B9S;
-	}
-	else{
-		firmStatus=UNKNOWN;
-	}
-	
-	if(memcmp(hash_stock_sd, header+0x20, 20)) {
-		//firmStatus=STOCK;
-		printf("Stock firm hash bad\n");
-		return 4;
-	}
-
-	if(memcmp(hash_b9s_sd, header+0x40, 20)) {
-		//firmStatus=B9S;
-		printf("B9S firm hash bad\n");
-		return 5;
-	}
-	
-	res = verifyUnlockKey("danger_force_stock.bin", true);  //forces app to assume stock firm status. will offer the "install boot9strap" option.
-	if(!res){
-		firmStatus=STOCK;
-		printf("FIRM STATUS override: STOCK\n");
-	}
-	
-	res = verifyUnlockKey("danger_force_b9s.bin", true);    //forces app to assume b9s firm status. will offer the "restore stock firmware" option.
-	if(!res){                                               //i don't expect users to ever need these overrides.
-		firmStatus=B9S;							
-		printf("FIRM STATUS override: B9S\n");
-	}
-
 	return 0;
 }
 
@@ -510,25 +363,20 @@ int dumpUnlockKey(){
 }
 
 void error(int code){
-	switch(code){
+	switch(code){ //0 4 5 6 9 2 99 9 12 10
 		case 0:  iprintf("Fat could not be initialized!\n"); break;
-		case 1:  iprintf("Could not open file handle!\n"); break;
 		case 2:  iprintf("Not a 3ds (or nand read error)!\n"); break;
-		case 3:  iprintf("Could not open sdmc files!\n"); break;
-		case 4:  iprintf("Workbuffer failed init!\n"); break;
+		case 4:  iprintf("Workbuffer(s) failed init!\n"); break;
 		case 5:  iprintf("Nand failed init!\n"); break;
-		case 6:  iprintf("Failed to load valid Firm from\nBACKUP.BIN\n"); break;
-		case 7:  iprintf("Problem verifying BACKUP.BIN\n"); break;
-		case 8:  iprintf("Create BACKUP.BIN failed!\n"); break;
+		case 6:  iprintf("Failed to load valid Firm"); break;
+		case 7:  iprintf("Nand read error"); break;
 		case 9:  iprintf("A9LH dectected! Brick avoided!!\nhttps://3ds.hacks.guide/a9lh-to-b9s.html\n"); break;
 		case 10: iprintf("Unlock file read error\n"); break;
-		case 11: iprintf("Unlock file verify error\n"); break;
 		case 12: iprintf("shadowNAND! Brick avoided!!\nhttps://3ds.hacks.guide/a9lh-to-b9s.html\n"); break;
 		case 99:;
 		default: break;
 	}
 
 	iprintf("\nPress home to exit\n");
-	//free(workbuffer); free(fbuff); free(nbuff); free(xbuff);
 	while(1)swiWaitForVBlank();
 }
