@@ -33,8 +33,8 @@ It is recommended you only install boot9strap once.<br><br>
 Firmware info:<br>
 - 4.0.1 - 5.0.0 is for firmware 11.8 ONLY (always check the firmware in the app menu to be sure as this can change as new firmwares are released!)<br>
 - 4.0.0 is for firmwares 11.4 to 11.7 ONLY<br>
-- Be careful using b9sTool between firmware updates -  the app should only allow you to restore B9S after it detects a native firm update. Restoring stock (i.e. downgrading your native firm with respect to the rest of the firmware titles) is a pretty bad idea!<br>
+- Be careful using b9sTool between firmware updates -  only use b9sTool on the firmware it's intended fore.<br>
 
 #### Credits
 
-+ zoogie
++ zoogie, plailect
