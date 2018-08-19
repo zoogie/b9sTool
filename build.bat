@@ -1,4 +1,4 @@
-make clean FIRM_INFO="For firmware 11.8.0-X ONLY"
-make FIRM_INFO="For firmware 11.8.0-X ONLY"
+
+make FIRM_INFO="Firmware 11.4 - 11.7 ONLY"
 cp boot.nds h:/
 pause
