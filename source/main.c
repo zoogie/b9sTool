@@ -7,13 +7,11 @@
 #include "payload.h"
 #include "firm_old.h"
 #include "firm_new.h"
+#include "hash_stash.h"
 
 #define VERSION "5.0.0"
-#define RWMINI	(128*512) //64 KB
+#define RWMINI	(256*512) //128 KB
 
-const u8 SHA1OLD[20]={0x6C,0xC0,0xEA,0xE5,0xDE,0x7C,0x09,0x67,0xD2,0x48,0xBE,0x52,0xAE,0x84,0x9B,0x05,0x70,0x08,0xF6,0x0C}; //native firm 2.55-0 old3ds
-const u8 SHA1NEW[20]={0x2D,0xCA,0xB6,0x41,0xA7,0xDC,0xA7,0x8F,0x84,0xC2,0x72,0x1E,0xC4,0xA4,0x6F,0xCB,0x06,0xD0,0xBD,0x4C}; //native firm 2.55-0 new3ds
-const u8 SHA1B9S[20]={0xBF,0x91,0x19,0x46,0xB2,0x42,0x63,0x7C,0x11,0x05,0xCC,0x6B,0xD3,0xF2,0x81,0x58,0xBC,0xC6,0xE2,0xD1}; //boot9strap 1.3
 u32 foffset=0x0B130000 / 0x200; //FIRM0
 //  foffset=0x0B530000 / 0x200;   FIRM1 (for experts or yolo'ers only!)
 int menu_size=2;
@@ -54,7 +52,7 @@ u32 O3DS=1;
 u32 firmStatus=0;
 u64 frame=0;
 
-char workdir[]= "boot9strap";
+char workdir[]= "fastboot3DS";
 u8 *workbuffer; //raw dump and restore in first two options
 u8 *fbuff; //sd firm files
 u8 *xbuff; //xorpad
@@ -86,7 +84,7 @@ int main() {
 	if(!workbuffer || !fbuff || !nbuff || !xbuff) error(4);
 	
 	remainMB=getMBremaining();
-	mkdir(workdir, 0777);   //boot9strap folder creation
+	mkdir(workdir, 0777);   //fastboot3DS folder creation
 	chdir(workdir);
 	checkNCSD();            //read ncsd header for needed info
 	dumpUnlockKey();
@@ -96,7 +94,6 @@ int main() {
 	while(wait--)swiWaitForVBlank();
 	while(handleUI());  //game loop
 
-	systemShutDown();
 	return 0;
 }
 
@@ -152,7 +149,7 @@ void installB9S() {
 		memcpy(fbuff, firm_new, payload_len);
 	}
 	
-	iprintf("Preparing crypted b9s firm...\n");
+	iprintf("Preparing crypted fastboot firm\n");
 	
 	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm 11.8 with plaintext firm 11.8 to create xorpad buff
 	memcpy(fbuff, payload, payload_len);                    //get payload
@@ -176,7 +173,15 @@ void installB9S() {
 	iprintf("%s created\n", xorname);
 	
 	iprintf("\nDone!\n");
-	error(99); //not really an error, we just don't want multiple nand writes in one session.
+	
+	while(1){  //if people want to see the text, they can hold START or SELECT. otherwise, straight to hax we go!
+		swiWaitForVBlank();
+		scanKeys();
+		int keys=keysHeld();
+		if(!(keys & KEY_START) && !(keys & KEY_SELECT)) break;
+	}
+	
+	exit(res); //actually just resets to that grey screen on 3ds. wish it was a proper reset to home menu.
 }
 
 u32 handleUI(){
@@ -184,7 +189,7 @@ u32 handleUI(){
 	consoleClear();
 	
 	char action[64];
-	sprintf(action,"Install boot9strap\n");
+	sprintf(action,"Install fastboot3DS\n");
 
 	char menu[2][64];
 	strcpy(menu[0],"Exit\n");
@@ -198,7 +203,7 @@ u32 handleUI(){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
 	}
 	
-	iprintf("\n%sWARNING:%s DONT install boot9strap",yellow,white);
+	iprintf("\n%sWARNING:%s DONT install fastboot\n",yellow,white);
 	iprintf("multiple times!!\n");
 	iprintf("%sWARNING:%s Only use b9sTool with\n",yellow,white);
 	iprintf("https://3ds.hacks.guide\n");
@@ -254,7 +259,7 @@ int getFirmBuf(u32 len){
 	u8 digest[20];
 	int res=0;
 	
-	iprintf("Loading b9s from RAM...\n");
+	iprintf("Loading fastboot3DS from RAM...\n");
 	swiSHA1Calc(digest, payload, len);
 	res = memcmp(SHA1B9S, digest, 20);
 	if(res) return 0;

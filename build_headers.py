@@ -1,4 +1,4 @@
-import os,sys,glob,binascii
+import os,sys,glob,binascii,hashlib
 
 def generateHeader(buff, arrayName, firmwareNames):
 	f=open("source/"+arrayName+".h","w")
@@ -15,13 +15,24 @@ def generateHeader(buff, arrayName, firmwareNames):
 	f.write("\n")
 	f.write("};")
 	f.close()
+	
+def hash(buf):
+	obj=hashlib.sha1(buf)
+	return obj.digest()
+	
+def buff2array(s):
+	final=""
+	for i in s:
+		final+=",0x%02X" % ord(i)
+	return final[1:]
+	
 try:
 	firmwareNames=sys.argv[1]
 except:
 	print('python build.py <string to describe compatible firm versions to users>')
 	exit()
 	
-payload="payload/boot9strap.firm"
+payload="payload/fastboot3DS.firm"
 firm_old3ds=glob.glob("firm_old3ds/*")
 firm_new3ds=glob.glob("firm_new3ds/*")
 
@@ -40,6 +51,14 @@ buff_new=fn.read(payload_len)
 fp.close()
 fo.close()
 fn.close()
+
+#print(hash(buff_old))
+#print(hash(buff_new))
+#print(hash(buff_pay))
+with open("source/hash_stash.h","w") as f:
+	f.write("const u8 SHA1OLD[20]={" + buff2array(hash(buff_old))+"}; //native firm 2.55-0 old3ds\n")
+	f.write("const u8 SHA1NEW[20]={" + buff2array(hash(buff_new))+"}; //native firm 2.55-0 new3ds\n")
+	f.write("const u8 SHA1B9S[20]={" + buff2array(hash(buff_pay))+"}; //payload")
 
 generateHeader(buff_old, "firm_old","")
 generateHeader(buff_new, "firm_new","")

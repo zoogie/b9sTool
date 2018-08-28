@@ -11,7 +11,7 @@ https://3ds.hacks.guide/<br>
 
 Compiling: 
 - Just supply the current decrypted FIRMs for both new/old 3ds and put them in the firm_new and firm_old 
-directories respectively. Then place the newest boot9strap.firm payload in the payload directory. Then compile with
+directories respectively. Then place the newest fastboot3DS.firm payload in the payload directory. Then compile with
 make FIRM_INFO="11.8 only" or whatever is actually the firmware range of the current native firm.
 The user does not have to supply any extra files like in previous versions. Needs the latest libfat version.
 
@@ -22,13 +22,13 @@ BACKUP.bin:<br>
 It was also a pain in the ass.<br><br>
 
 xorpad_0123ABCD.bin<br>
-- This is dumped to your boot9strap folder when b9s is installed. It isn't used now but may be useful in the future. Don't delete it.<br>
+- This is dumped to your fastboot3DS folder when b9s is installed. It isn't used now but may be useful in the future. Don't delete it.<br>
 The hex number in the filename is the first 4 bytes of the file's SHA1.<br><br>
 
 Cycling firm types:<br>
-- When you install boot9strap multiple times, the standard behavior is that it will cycle between b9s and stock firm.<br>
+- When you install fastboot3DS multiple times, the standard behavior is that it will cycle between b9s and stock firm.<br>
 Don't count on this though, it's just a property of xoring operations and really isn't intended.<br>
-It is recommended you only install boot9strap once.<br><br>
+It is recommended you only install fastboot3DS once.<br><br>
 
 Firmware info:<br>
 - 4.0.1 - 5.0.0 is for firmware 11.8 ONLY (always check the firmware in the app menu to be sure as this can change as new firmwares are released!)<br>
