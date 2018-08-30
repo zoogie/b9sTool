@@ -7,13 +7,11 @@
 #include "payload.h"
 #include "firm_old.h"
 #include "firm_new.h"
+#include "hash_stash.h"
 
 #define VERSION "5.0.0"
 #define RWMINI	(128*512) //64 KB
 
-const u8 SHA1OLD[20]={0x6C,0xC0,0xEA,0xE5,0xDE,0x7C,0x09,0x67,0xD2,0x48,0xBE,0x52,0xAE,0x84,0x9B,0x05,0x70,0x08,0xF6,0x0C}; //native firm 2.55-0 old3ds
-const u8 SHA1NEW[20]={0x2D,0xCA,0xB6,0x41,0xA7,0xDC,0xA7,0x8F,0x84,0xC2,0x72,0x1E,0xC4,0xA4,0x6F,0xCB,0x06,0xD0,0xBD,0x4C}; //native firm 2.55-0 new3ds
-const u8 SHA1B9S[20]={0xBF,0x91,0x19,0x46,0xB2,0x42,0x63,0x7C,0x11,0x05,0xCC,0x6B,0xD3,0xF2,0x81,0x58,0xBC,0xC6,0xE2,0xD1}; //boot9strap 1.3
 u32 foffset=0x0B130000 / 0x200; //FIRM0
 //  foffset=0x0B530000 / 0x200;   FIRM1 (for experts or yolo'ers only!)
 int menu_size=2;
@@ -127,8 +125,8 @@ void installB9S() {
 	char xorname[64]={0};
 	consoleClear();
 	iprintf("%sWILL BRICK%s if A9LH is installed!", yellow, white); 
-	iprintf("%sMAKE SURE%s your 3DS firmware is\n", yellow, white);
-	iprintf("%s11.8.0-X%s! Or %sFAIL%s!\n\n", blue, white, red, white);
+	iprintf("%sREMEMBER:%s\n", yellow, white);
+	iprintf("%s%s%s!\n\n", blue, firmwareNames, white);
 	if(waitNandWriteDecision())return;
 	consoleClear();
 	
@@ -154,7 +152,7 @@ void installB9S() {
 	
 	iprintf("Preparing crypted b9s firm...\n");
 	
-	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm 11.8 with plaintext firm 11.8 to create xorpad buff
+	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm with plaintext firm to create xorpad buff
 	memcpy(fbuff, payload, payload_len);                    //get payload
 	xorbuff(fbuff,xbuff,nbuff);                             //xor payload and xorpad to create final encrypted image to write to destination
 	memcpy(workbuffer, nbuff, payload_len);	                //write it to destination
@@ -265,7 +263,7 @@ int getFirmBuf(u32 len){
 		res = memcmp(SHA1OLD, digest, 20);
 		if(!res) return O3DS;
 		printf("O3DS firm not in RAM trying SD\n");
-		file2buf("2.55-0_11.8_OLD.firm", firm_old, payload_len);
+		file2buf(FIRM_OLD, firm_old, payload_len);
 		swiSHA1Calc(digest, firm_old, len);
 		res = memcmp(SHA1OLD, digest, 20);
 		if(!res) return O3DS;
@@ -275,7 +273,7 @@ int getFirmBuf(u32 len){
 		res = memcmp(SHA1NEW, digest, 20);
 		if(!res) return N3DS;
 		printf("N3DS firm not in RAM trying SD\n");
-		file2buf("2.55-0_11.8_NEW.firm", firm_new, payload_len);
+		file2buf(FIRM_NEW, firm_new, payload_len);
 		swiSHA1Calc(digest, firm_new, len);
 		res = memcmp(SHA1NEW, digest, 20);
 		if(!res) return N3DS;
