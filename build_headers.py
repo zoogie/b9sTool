@@ -49,13 +49,17 @@ fn=open(firm_new3ds[0],"rb")
 
 buff_pay=fp.read()
 payload_len=len(buff_pay)
-
+	
 buff_old=fo.read(payload_len)
 buff_new=fn.read(payload_len)
 
 fp.close()
 fo.close()
 fn.close()
+
+if(payload_len > len(buff_old) or payload_len > len(buff_new)):
+	print("Payload is too large!")
+	sys.exit(1)
 
 print("payload length: %08X" % payload_len)
 print("old firm  sha1: %s" % binascii.hexlify(hash(buff_old,False)))

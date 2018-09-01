@@ -10,7 +10,8 @@
 #include "hash_stash.h"
 
 #define VERSION "5.0.0"
-#define RWMINI	(128*512) //64 KB
+#define WKDIR "boot9strap"
+#define RWMINI	(payload_len)
 
 u32 foffset=0x0B130000 / 0x200; //FIRM0
 //  foffset=0x0B530000 / 0x200;   FIRM1 (for experts or yolo'ers only!)
@@ -52,7 +53,7 @@ u32 O3DS=1;
 u32 firmStatus=0;
 u64 frame=0;
 
-char workdir[]= "boot9strap";
+char workdir[]= WKDIR;
 u8 *workbuffer; //raw dump and restore in first two options
 u8 *fbuff; //sd firm files
 u8 *xbuff; //xorpad
@@ -84,7 +85,7 @@ int main() {
 	if(!workbuffer || !fbuff || !nbuff || !xbuff) error(4);
 	
 	remainMB=getMBremaining();
-	mkdir(workdir, 0777);   //boot9strap folder creation
+	mkdir(workdir, 0777);   //app folder creation
 	chdir(workdir);
 	checkNCSD();            //read ncsd header for needed info
 	dumpUnlockKey();
@@ -150,7 +151,7 @@ void installB9S() {
 		memcpy(fbuff, firm_new, payload_len);
 	}
 	
-	iprintf("Preparing crypted b9s firm...\n");
+	iprintf("Preparing payload firm...\n");
 	
 	xorbuff(fbuff,nbuff,xbuff);                             //xor the enc firm with plaintext firm to create xorpad buff
 	memcpy(fbuff, payload, payload_len);                    //get payload
@@ -182,7 +183,7 @@ u32 handleUI(){
 	consoleClear();
 	
 	char action[64];
-	sprintf(action,"Install boot9strap\n");
+	sprintf(action,"Install %s\n", WKDIR);
 
 	char menu[2][64];
 	strcpy(menu[0],"Exit\n");
@@ -196,7 +197,7 @@ u32 handleUI(){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
 	}
 	
-	iprintf("\n%sWARNING:%s DONT install boot9strap",yellow,white);
+	iprintf("\n%sWARNING:%s DONT install payload\n",yellow,white);
 	iprintf("multiple times!!\n");
 	iprintf("%sWARNING:%s Only use b9sTool with\n",yellow,white);
 	iprintf("https://3ds.hacks.guide\n");
@@ -252,7 +253,7 @@ int getFirmBuf(u32 len){
 	u8 digest[20];
 	int res=0;
 	
-	iprintf("Loading b9s from RAM...\n");
+	iprintf("Loading %s from RAM...\n", WKDIR);
 	swiSHA1Calc(digest, payload, len);
 	res = memcmp(SHA1B9S, digest, 20);
 	if(res) return 0;
