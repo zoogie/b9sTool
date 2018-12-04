@@ -9,7 +9,7 @@
 #include "firm_new.h"
 #include "hash_stash.h"
 
-#define VERSION "5.0.0"
+#define VERSION "5.0.1"
 #define WKDIR "boot9strap"
 #define RWMINI	(payload_len)
 
@@ -202,10 +202,9 @@ u32 handleUI(){
 	iprintf("%sWARNING:%s Only use b9sTool with\n",yellow,white);
 	iprintf("https://3ds.hacks.guide\n");
 	iprintf("%sWARNING:%s\n",yellow,white);
-	
-	for(int i=0; i<(frame/30)%6 ;i++){
-		iprintf("%s%s%s\n", blue, firmwareNames, white); //even with explosions and strobing lights I don't think noobs will read this
-	}
+
+	if(frame % 30 < 15) iprintf("%s%s%s\n", blue,  firmwareNames, white);
+		else 			iprintf("%s%s%s\n", white, firmwareNames, white);
 
 	swiWaitForVBlank();
 	scanKeys();
