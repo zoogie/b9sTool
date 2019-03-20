@@ -368,9 +368,9 @@ void error(int code){
 		case 5:  iprintf("Nand failed init!\n"); break;
 		case 6:  iprintf("Failed to load valid Firm"); break;
 		case 7:  iprintf("Nand read error"); break;
-		case 9:  iprintf("A9LH dectected! Brick avoided!!\nhttps://3ds.hacks.guide/a9lh-to-b9s.html\n"); break;
+		case 9:  iprintf("A9LH dectected! Brick avoided!!\nhttps://discord.gg/C29hYvh (assistance)\n"); break;
 		case 10: iprintf("Unlock file read error\n"); break;
-		case 12: iprintf("shadowNAND! Brick avoided!!\nhttps://3ds.hacks.guide/a9lh-to-b9s.html\n"); break;
+		case 12: iprintf("shadowNAND! Brick avoided!!\nhttps://discord.gg/C29hYvh (assistance)\n"); break;
 		case 99:;
 		default: break;
 	}
