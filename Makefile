@@ -101,9 +101,9 @@ export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 #---------------------------------------------------------------------------------
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
-	@python build_headers.py "$(FIRM_INFO)"
+	@py -2 build_headers.py "$(FIRM_INFO)"
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
-	@cp b9sTool.nds boot.nds
+	@cp $(TARGET).nds boot.nds
  
 #---------------------------------------------------------------------------------
 clean:
