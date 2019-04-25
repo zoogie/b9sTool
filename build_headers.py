@@ -15,22 +15,22 @@ def generateHeader(buff, arrayName, firmwareNames, filename, isnew):
 	
 	f=open("source/"+arrayName+".c","w")
 	f.write("unsigned char "+arrayName+"[] = {\n")
-	for i in buff:
-		f.write("0x"+binascii.hexlify(i)+",")
+	for i in bytearray(buff):
+		f.write("0x%02X," % i)
 	f.write("\n")
 	f.write("};")
 	f.close()
 	
 def hash(buf,ifnull):
 	if(ifnull):
-		return "\x00"*20
+		return b"\x00"*20
 	obj=hashlib.sha1(buf)
 	return obj.digest()
 	
 def buff2array(s):
 	final=""
-	for i in s:
-		final+=",0x%02X" % ord(i)
+	for i in bytearray(s):
+		final+=",0x%02X" % i
 	return final[1:]
 	
 try:
@@ -69,11 +69,11 @@ print("(all files hashed to payload length)\n")
 
 null_old=False
 null_new=False
-if("FIRM" not in buff_old[:4]):
+if(b"FIRM" not in buff_old[:4]):
 	null_old=True
 	print("Non-firm detected, SHA1 will be nulled for old3ds")
 	print("Old3ds native firm must be loaded from SD!\n")
-if("FIRM" not in buff_new[:4]):
+if(b"FIRM" not in buff_new[:4]):
 	null_new=True
 	print("Non-firm detected, SHA1 will be nulled for new3ds")
 	print("New3ds native firm must be loaded from SD!\n")
