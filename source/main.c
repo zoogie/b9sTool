@@ -9,7 +9,7 @@
 #include "firm_new.h"
 #include "hash_stash.h"
 
-#define VERSION "5.0.1"
+#define VERSION "5.0.2"
 #define WKDIR "boot9strap"
 #define RWMINI	(payload_len)
 
