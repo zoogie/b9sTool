@@ -7,6 +7,10 @@
 #include "payload.h"
 #include "firm_old.h"
 #include "firm_new.h"
+#include "stage2_payload.h"
+#include "stage3_payload.h"
+#include "a9lh_bin_installer.h"
+#include "secret_sector.h"
 #include "hash_stash.h"
 
 #define VERSION "5.0.2"
@@ -22,12 +26,13 @@ int main();
 int checkNCSD();
 void xorbuff(u8 *in1, u8 *in2, u8 *out);
 void installB9S();
+void handleA9LH();
 u32 handleUI();
 u32 waitNandWriteDecision();
 u32 getMBremaining();
 int getFirmBuf(u32 len);
 int file2buf(char *path, u8 *buf, u32 limit);
-int buf2file(char *path, u8 *buf, u32 size);
+int buf2file(char *path, const u8 *buf, u32 size);
 int checkA9LH();
 int verifyUnlockKey(char *path, bool delete);
 void error(int code);
@@ -58,6 +63,8 @@ u8 *workbuffer; //raw dump and restore in first two options
 u8 *fbuff; //sd firm files
 u8 *xbuff; //xorpad
 u8 *nbuff; //nand
+char a9lhkey[14];
+bool clear_stage2 = false;
 PrintConsole topScreen;
 PrintConsole bottomScreen;
 
@@ -69,9 +76,9 @@ int main() {
 	vramSetBankA(VRAM_A_MAIN_BG);
 	consoleInit(&bottomScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, false, true);
 	consoleInit(&topScreen, 3,BgType_Text4bpp, BgSize_T_256x256, 31, 0, true, true);
-    consoleSelect(&topScreen); 
+	consoleSelect(&topScreen); 
 	
-    iprintf("Initializing FAT... ");
+	iprintf("Initializing FAT... ");
 	if (!fatInitDefault()) error(0);
 	printf("good\n");
 	iprintf("Initializing NAND... ");
@@ -89,7 +96,26 @@ int main() {
 	chdir(workdir);
 	checkNCSD();            //read ncsd header for needed info
 	dumpUnlockKey();
-	checkA9LH();
+
+	int a9lh = checkA9LH();
+	if(a9lh) {
+		const char* impl = (a9lh == 12) ? "ShadowNAND" : "arm9loaderhax";
+		iprintf("\n\n\n%s detected!\n\nHandling for this is\nexperimental; please try to\nuninstall it some other way\nbefore running b9stool.\n\n", impl);
+		iprintf("If you have exhausted\nother options for\nuninstalling %s,\npress A to continue.\nPress B to exit.", impl);
+		while (1) {
+			scanKeys();
+			int keys = keysHeld();
+			if(keys & KEY_A) break;
+			if(keys & KEY_B) {
+				consoleClear();
+				systemShutDown();
+				return 0;
+			}
+			swiWaitForVBlank();
+		}
+		consoleSelect(&bottomScreen);
+		handleA9LH();
+	}
 	
 	int wait=120;
 	while(wait--)swiWaitForVBlank();
@@ -100,7 +126,10 @@ int main() {
 }
 
 int checkNCSD() {
+	u8 hash[20];
 	nand_ReadSectors(0 , 1 , workbuffer);   //get NCSD (nand) header of the 3ds
+	swiSHA1Calc(hash, workbuffer, 0x200);
+	sprintf(a9lhkey, "a9lh_%04X.bin", *((u16*) hash));
 	memcpy(&sysid, workbuffer + 0x100, 4);  //NCSD magic
 	memcpy(&ninfo, workbuffer + 0x104, 4);  //nand size in sectors (943 or 1240 MB). used to determine old/new 3ds.
 	if     (ninfo==0x00200000){ System=O3DS;}    //old3ds
@@ -118,14 +147,46 @@ void xorbuff(u8 *in1, u8 *in2, u8 *out){
 
 }
 
+bool verified_nand_ReadSectors(sec_t sector, sec_t numSectors, void* buffer) {
+	u8 hash1[20];
+	u8 hash2[20];
+
+	if(!nand_ReadSectors(sector, numSectors, buffer))
+		return false;
+
+	swiSHA1Calc(hash1, buffer, numSectors * 0x200);
+
+	if(!nand_ReadSectors(sector, numSectors, buffer))
+		return false;
+
+	swiSHA1Calc(hash2, buffer, numSectors * 0x200);
+
+	return (memcmp(hash1, hash2, 20) == 0);
+
+}
+
+bool verified_nand_WriteSectors(sec_t sector, sec_t numSectors, const void* buffer) {
+	u8* buf = malloc(numSectors * 0x200);
+
+	if(!buf) return false;
+
+	if(!nand_WriteSectors(sector, numSectors, buffer) ||
+	!nand_ReadSectors(sector, numSectors, buf) ||
+	(memcmp(buffer, buf, numSectors * 0x200) != 0)) {
+		free(buf);
+		return false;
+	}
+
+	free(buf);
+	return true;
+}
+
 void installB9S() {
 	int res;
 	u8 hash[20];
-	u8 hash1[20];
-	u8 hash2[20];
 	char xorname[64]={0};
 	consoleClear();
-	iprintf("%sWILL BRICK%s if A9LH is installed!", yellow, white); 
+	//iprintf("%sMAY BRICK%s if A9LH is installed!", yellow, white); 
 	iprintf("%sREMEMBER:%s\n", yellow, white);
 	iprintf("%s%s%s!\n\n", blue, firmwareNames, white);
 	if(waitNandWriteDecision())return;
@@ -133,12 +194,10 @@ void installB9S() {
 	
 	memset(workbuffer, 0, RWMINI);
 	iprintf("Loading clean firm ...\n");
-	nand_ReadSectors(foffset, payload_len / 0x200, workbuffer);
-	swiSHA1Calc(hash1, workbuffer, payload_len);
-	nand_ReadSectors(foffset, payload_len / 0x200, workbuffer);
-	swiSHA1Calc(hash2, workbuffer, payload_len);
 	
-	if(memcmp(hash1, hash2, 20)) error(7);
+	if(!verified_nand_ReadSectors(foffset, payload_len / 0x200, workbuffer)) 
+		error(7);
+
 	memcpy(nbuff, workbuffer, payload_len);
 	
 	res = getFirmBuf(payload_len);  
@@ -158,17 +217,21 @@ void installB9S() {
 	xorbuff(fbuff,xbuff,nbuff);                             //xor payload and xorpad to create final encrypted image to write to destination
 	memcpy(workbuffer, nbuff, payload_len);	                //write it to destination
 	
-	swiSHA1Calc(hash2, workbuffer, payload_len);
-
-	nand_WriteSectors(foffset, payload_len/0x200, workbuffer);
-	nand_ReadSectors(foffset, payload_len/0x200, workbuffer);
-	swiSHA1Calc(hash,  workbuffer, payload_len);
-	res = memcmp(hash, hash2, 20);
+	res = verified_nand_WriteSectors(foffset, payload_len/0x200, workbuffer) ? 0 : 1;
 	if(res) iprintf("%sNAND WRITE FAIL !!!!!!!!!!!!!!\n",red);
 	iprintf("Result: %08X %s\n", res, res ? "HASH FAIL":"HASH GOOD!");
 	iprintf("%d KBs written to FIRM\n", payload_len / 1024);
 	unlink("/luma/config.bin");
 	
+	if(!res && clear_stage2) {
+		nand_ReadSectors(0x5BFFF, 1, workbuffer);
+		if((workbuffer[0] != 0xFF) && (workbuffer[0] != 0x00))
+			workbuffer[0] = 0x00;
+		memset(workbuffer, workbuffer[0], 0x200);
+		for(int i=0;i<0x44E;i++)
+			nand_WriteSectors(0x5BFFF+i, 1, workbuffer);
+	}
+
 	swiSHA1Calc(hash, xbuff, payload_len);
 	sprintf(xorname, "xorpad_%02X%02X%02X%02X.bin", hash[0],hash[1],hash[2],hash[3]);
 	buf2file(xorname, xbuff, payload_len); 					//might be useful someday, but for now, we'll just put it here for safekeeping.
@@ -176,6 +239,52 @@ void installB9S() {
 	
 	iprintf("\nDone!\n");
 	error(99); //not really an error, we just don't want multiple nand writes in one session.
+}
+
+void handleA9LH() {
+	iprintf("After b9stool runs, the\nsystem will reboot.\n\nIf you don't see a\nluma configuration menu\nafter that the reboot,\nrun b9stool again ONCE.\n\n");
+
+	if(waitNandWriteDecision()) error(99);
+	
+	u8 hash[20];
+
+	swiSHA1Calc(hash, payload, payload_len);
+	if(memcmp(hash, SHA1B9S, 20)) error(6);
+	swiSHA1Calc(hash, stage2_payload, stage2_payload_len);
+	if(memcmp(hash, SHA1S2P, 20)) error(6);
+	swiSHA1Calc(hash, stage3_payload, stage3_payload_len);
+	if(memcmp(hash, SHA1S3P, 20)) error(6);
+	swiSHA1Calc(hash, a9lh_bin_installer, a9lh_bin_installer_len);
+	if(memcmp(hash, SHA1ABI, 20)) error(6);
+	if(System == N3DS) {
+		swiSHA1Calc(hash, secret_sector, secret_sector_len);
+		if(memcmp(hash, SHA1SEC, 20)) {
+			if(file2buf("secret_sector.bin", secret_sector, secret_sector_len))
+				error(6);
+			swiSHA1Calc(hash, secret_sector, secret_sector_len);
+			if(memcmp(hash, SHA1SEC, 20))
+				error(6);
+		} else if(buf2file("secret_sector.bin", secret_sector, secret_sector_len))
+			error(6);
+	}
+
+	if (
+		buf2file("boot9strap.firm", payload, payload_len) ||
+		buf2file("boot9strap.firm.sha", SHA2B9S, 32) ||
+		buf2file("arm9loaderhax_si.bin", a9lh_bin_installer, a9lh_bin_installer_len)
+	) error(6);
+
+	rename("key.bin", a9lhkey);
+	unlink("/luma/config.bin");
+
+	// LAZINESS WARNING: assumes payload lengths divide nicely into a number of sectors
+	if (!verified_nand_WriteSectors(0x5C000, stage2_payload_len / 0x200, stage2_payload))
+		iprintf("%sSTAGE2 WRITE FAIL !!!!!!!!!!!!!!\n",red);
+	if (!verified_nand_WriteSectors(0x5C008, stage3_payload_len / 0x200, stage3_payload))
+		iprintf("%sSTAGE3 WRITE FAIL !!!!!!!!!!!!!!\n",red);
+
+	iprintf("\nDone!\n");
+	error(99);
 }
 
 u32 handleUI(){
@@ -300,7 +409,7 @@ int file2buf(char *path, u8 *buf, u32 limit){
 	return 0;
 }
 
-int buf2file(char *path, u8 *buf, u32 size){
+int buf2file(char *path, const u8 *buf, u32 size){
 	u32 bytes_written=0;
 	FILE *f=fopen(path, "wb");
 	if(!f) return 1;
@@ -317,15 +426,17 @@ int checkA9LH(){
 	int res=0;
 	iprintf("Checking for A9LH...\n");
 	
-	res = verifyUnlockKey("danger_skip_a9lh.bin", false);  //override check if file found
+	res = verifyUnlockKey(a9lhkey, true);  //override check if file found
 	if(!res){
-		iprintf("A9LH file found, overriding\nA9LH check. This is *very*\ndangerous!!\n");
-		return 1;
+		iprintf("A9LH file found, overriding\nA9LH check.\n");
+		clear_stage2 = true;
+		return 0;
 	}
 	
-	nand_ReadSectors(0x5C000, 80*KB/0x200, workbuffer); 
-	if(memmem(workbuffer, 80*KB, "arm9loaderhax.bin", 17) != 0) error(9); //standard a9lh and 3dsafe
-	if(memmem(workbuffer, 80*KB, "boot.bin", 8) != 0) error(12);          //shadowNAND
+	if (!verified_nand_ReadSectors(0x5C000, 80*KB/0x200, workbuffer))
+		error(7); 
+	if(memmem(workbuffer, 80*KB, "arm9loaderhax.bin", 17) != 0) return 9; //standard a9lh and 3dsafe
+	if(memmem(workbuffer, 80*KB, "boot.bin", 8) != 0) return 12;          //shadowNAND
 	//nand offset 0xB800000 or FIRM1+0x2D0000
     //this is where plaintext stage2 a9lh payload is written
     //and the string "arm9loaderhax.bin" or "boot.bin" should be within 80KB of that offset
@@ -366,11 +477,11 @@ void error(int code){
 		case 2:  iprintf("Not a 3ds (or nand read error)!\n"); break;
 		case 4:  iprintf("Workbuffer(s) failed init!\n"); break;
 		case 5:  iprintf("Nand failed init!\n"); break;
-		case 6:  iprintf("Failed to load valid Firm"); break;
+		case 6:  iprintf("File load failed"); break;
 		case 7:  iprintf("Nand read error"); break;
-		case 9:  iprintf("A9LH dectected! Brick avoided!!\nhttps://discord.gg/C29hYvh (assistance)\n"); break;
+		//case 9:  iprintf("A9LH dectected! Brick avoided!!\nhttps://discord.gg/C29hYvh (assistance)\n"); break;
 		case 10: iprintf("Unlock file read error\n"); break;
-		case 12: iprintf("shadowNAND! Brick avoided!!\nhttps://discord.gg/C29hYvh (assistance)\n"); break;
+		//case 12: iprintf("shadowNAND! Brick avoided!!\nhttps://discord.gg/C29hYvh (assistance)\n"); break;
 		case 99:;
 		default: break;
 	}
