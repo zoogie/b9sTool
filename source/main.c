@@ -242,7 +242,7 @@ void installB9S() {
 }
 
 void handleA9LH() {
-	iprintf("After b9stool runs, the\nsystem will reboot.\n\nIf you don't see a\nluma configuration menu\nafter that the reboot,\nrun b9stool again ONCE.\n\n");
+	iprintf("After b9stool runs, the\nsystem will reboot.\n\nIf you don't see a\nluma configuration menu\nafter the reboot,\nrun b9stool again ONCE.\n\n");
 
 	if(waitNandWriteDecision()) error(99);
 	
