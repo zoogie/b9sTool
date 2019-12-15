@@ -1,7 +1,6 @@
-A. If you get an a9lh error. 
-- First, make sure you really don't have a9lh. If you use b9sTool with a9lh, you will brick.<br>
-If you're sure this is a false positive: rename boot9strap/key.bin (this is your console unique NAND header) to danger_skip_a9lh.bin<br>
-Then rerun b9sTool and the error should be skipped and you get to the menu. Unlike other override files, this one will stay persistant and not be deleted.<br>
+A. If you get an a9lh or shadowNAND "brick avoided" error. 
+- Wait. We should have a b9sTool update that safely gets you past this dire warning within a few days (this edit was made 12/14/2019).<br>
+Visit this Discord channel if you have any questions: https://discord.gg/C29hYvh <br>
 
 B. You select "Install boot9strap", reset the system, but the system just boots up normal.<br>
 - Go to System Settings > Other Settings > Page 4 > System Update. Make sure to actually attempt to update with wifi on.<br>
