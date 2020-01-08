@@ -41,4 +41,4 @@ Firmware info:<br>
 
 #### Credits
 
-+ zoogie, plailect
++ zoogie, aspargas2, plailect
