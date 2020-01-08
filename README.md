@@ -7,11 +7,14 @@ https://3ds.hacks.guide/<br>
 
 - This app only writes to FIRM0, not FIRM1, so it should be safe given your FIRM1 is not corrupt or a9lh'd.<br>
 - Never use this on anything but 3DS FIRM 11.13.0-YZ<br>
-- NEVER use this if arm9loaderhax or sighax is installed (on any firmware)! The result will be a brick!<br>
+- Never use this if sighax/b9s is already installed (on any firmware)! The result will be a sloppy uninstallation at best and a brick at worst<br>
+- Be cautious when using this with arm9loaderhax installed, as the special handling for it is still experimental
 
 Compiling: 
 - Just supply the current decrypted FIRMs for both new/old 3ds and put them in the firm_new and firm_old 
-directories respectively. Then place the newest boot9strap.firm payload in the payload directory. Then compile with
+directories respectively. Then place the newest boot9strap.firm payload in the payload directory. You will also
+need to supply a clean secret_sector.bin in the a9lh_files/secret_sector directory if you want the arm9loaderhax
+handling to work on n3ds systems without a the user supplying that file. Then compile with
 make FIRM_INFO="11.10 only" or whatever is actually the firmware range of the current native firm.
 The user does not have to supply any extra files like in previous versions. Needs the latest libfat version.
 
@@ -38,4 +41,4 @@ Firmware info:<br>
 
 #### Credits
 
-+ zoogie, plailect
++ zoogie, aspargas2, plailect
