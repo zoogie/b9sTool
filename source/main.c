@@ -101,7 +101,7 @@ int main() {
 	if(a9lh) {
 		const char* impl = (a9lh == 12) ? "ShadowNAND" : "arm9loaderhax";
 		iprintf("\n\n\n%s detected!\n\nHandling for this is\nexperimental; please try to\nuninstall it some other way\nbefore running b9stool.\n\n", impl);
-		iprintf("If you have exhausted\nother options for\nuninstalling %s,\npress A to continue.\nPress B to exit.\n\nAssitance: https://discord.gg/C29hYvh", impl);
+		iprintf("If you have exhausted\nother options for\nuninstalling %s,\npress A to continue.\nPress B to exit.\n\nAssistance: https://discord.gg/C29hYvh", impl);
 		while (1) {
 			scanKeys();
 			int keys = keysHeld();
