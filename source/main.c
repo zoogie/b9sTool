@@ -13,7 +13,7 @@
 #include "secret_sector.h"
 #include "hash_stash.h"
 
-#define VERSION "5.0.2"
+#define VERSION "6.0.1"
 #define WKDIR "boot9strap"
 #define RWMINI	(payload_len)
 
